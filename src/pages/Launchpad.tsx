@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, Navigate } from "react-router-dom";
 import {
   Users,
@@ -10,6 +10,8 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { useAuthStore } from "../store/useAuthStore";
 import logo from "../images/logo.png";
+import { createPmsLauncher } from '../services/pmsHandoff';
+import { apiClient } from '../services/apiClient';
 
 type ERPModule = {
   id: string;
@@ -50,7 +52,7 @@ const erpModules: ERPModule[] = [
     id: "pms",
     title: "Project Management",
     description:
-      "Plan projects, coordinate teams, track milestones and delivery",
+      "Plan projects, coordinate teams, track issues and delivery",
     icon: FolderKanban,
     to: "/project-management",
     external: true,
@@ -85,6 +87,19 @@ export default function Launchpad() {
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const projectManagementUrl =
     import.meta.env.VITE_PROJECT_MANAGEMENT_URL?.trim() || "/project-management";
+  const [launchError, setLaunchError] = useState('');
+  const [launching, setLaunching] = useState(false);
+  const pmsLauncher = useMemo(() => createPmsLauncher({
+    getToken: async signal => {
+      const response = await apiClient.post('/auth/project-management/token', {}, { signal });
+      if (response.data?.success !== true || typeof response.data?.data?.token !== 'string') throw new Error('Invalid identity response');
+      return response.data.data.token;
+    },
+    onError: setLaunchError,
+    onSettled: () => setLaunching(false)
+  }), []);
+  const canLaunchPms = hasPermission('project_management.access');
+  useEffect(() => () => pmsLauncher.cancel(), [pmsLauncher, user?.username, user?.employeeId, activeRole, canLaunchPms]);
 
   if (!user) return <Navigate to="/login" replace />;
 
@@ -104,6 +119,11 @@ export default function Launchpad() {
 
   const handleModuleClick = (mod: ERPModule) => {
     if (mod.disabled) return;
+
+    if (mod.id === 'pms') {
+      if (!canLaunchPms || launching) return;
+      setLaunchError(''); setLaunching(true); pmsLauncher.launch(projectManagementUrl); return;
+    }
 
     if (mod.id === "ems") {
       navigate(getEMSRoute());
@@ -125,6 +145,7 @@ export default function Launchpad() {
 
   const handleLogout = () => {
     if (window.confirm("Are you sure you want to logout?")) {
+      pmsLauncher.cancel();
       logout();
       navigate("/login");
     }
@@ -162,6 +183,8 @@ export default function Launchpad() {
           <h1>Select a Module</h1>
           <p>Choose a module to continue working</p>
         </div>
+        {launchError && <p role="alert">{launchError}</p>}
+        {launching && <p role="status" aria-live="polite">Opening Project Management…</p>}
 
         <div className="erp-lp-grid">
           {visibleModules.map((mod) => {
@@ -171,7 +194,7 @@ export default function Launchpad() {
                 key={mod.id}
                 className={`erp-lp-card${mod.disabled ? " erp-lp-card--disabled" : ""}`}
                 onClick={() => handleModuleClick(mod)}
-                disabled={mod.disabled}
+                disabled={mod.disabled || mod.id === 'pms' && launching}
                 type="button"
               >
                 <div className="erp-lp-card-icon">

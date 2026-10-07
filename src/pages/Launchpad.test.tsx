@@ -1,11 +1,14 @@
 ﻿import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Launchpad from "./Launchpad";
 
 const authMock = vi.hoisted(() => ({ user: { username: "admin" }, activeRole: "hr_manager" }));
 const permissionMock = vi.hoisted(() => ({ permissions: new Set<string>() }));
+const launcherMock = vi.hoisted(() => ({ launch: vi.fn(), cancel: vi.fn() }));
+vi.mock('../services/pmsHandoff', () => ({ createPmsLauncher: () => launcherMock }));
+vi.mock('../services/apiClient', () => ({ apiClient: { post: vi.fn() } }));
 
 vi.mock("../context/AuthContext", () => ({
   useAuth: () => ({
@@ -43,6 +46,7 @@ describe("Launchpad", () => {
     cleanup();
     permissionMock.permissions.clear();
     vi.unstubAllEnvs();
+    launcherMock.launch.mockClear(); launcherMock.cancel.mockClear();
   });
 
   it("shows ERP module selector with HR module for all roles", () => {
@@ -76,5 +80,12 @@ describe("Launchpad", () => {
 
     expect(screen.getByText("HR & Employee Management")).toBeTruthy();
     expect(screen.getByText("Select a Module")).toBeTruthy();
+  });
+  it('uses the configured bounded PMS launcher instead of URL navigation', () => {
+    vi.stubEnv('VITE_PROJECT_MANAGEMENT_URL', 'http://localhost:3000/');
+    permissionMock.permissions.add('project_management.access'); renderLaunchpad();
+    fireEvent.click(screen.getByText('Project Management'));
+    expect(launcherMock.launch).toHaveBeenCalledWith('http://localhost:3000/');
+    cleanup(); expect(launcherMock.cancel).toHaveBeenCalled();
   });
 });
