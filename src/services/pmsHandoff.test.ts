@@ -7,13 +7,27 @@ function fixture() {
     removeEventListener: (_: string, fn: (event: MessageEvent) => void) => listeners.delete(fn) } as unknown as Window;
   const getToken = vi.fn(async () => 'fictional-signed-token'), onError = vi.fn(), onSettled = vi.fn();
   const launcher = createPmsLauncher({ host, getToken, onError, onSettled });
+  cleanupLaunchers.push(() => launcher.cancel());
   const dispatch = (data: unknown, origin = 'http://localhost:3000', source: unknown = child) => {
     listeners.forEach(listener => listener({ data, origin, source } as MessageEvent));
   };
   return { launcher, host, child, listeners, getToken, onError, onSettled, dispatch };
 }
 const ready = { version: 1, type: 'pms:ready', challenge: 'a'.repeat(64) };
-afterEach(() => vi.useRealTimers());
+const cleanupLaunchers: Array<() => void> = [];
+it('revalidates a reloaded child with a fresh token and rejects a completed challenge', async () => {
+  const x = fixture(); x.launcher.launch('http://localhost:3000/');
+  x.dispatch(ready); await vi.waitFor(() => expect(x.child.postMessage).toHaveBeenCalledTimes(1));
+  x.dispatch(ready); await Promise.resolve(); expect(x.getToken).toHaveBeenCalledTimes(1);
+  x.getToken.mockResolvedValue('fresh-token');
+  x.dispatch({ ...ready, challenge: 'b'.repeat(64) });
+  await vi.waitFor(() => expect(x.child.postMessage).toHaveBeenCalledTimes(2));
+  expect(x.getToken).toHaveBeenCalledTimes(2);
+  expect(x.child.postMessage).toHaveBeenLastCalledWith({ ...ready, challenge: 'b'.repeat(64), type: 'pms:identity', token: 'fresh-token' }, 'http://localhost:3000');
+  expect(x.onSettled).toHaveBeenCalledTimes(1);
+  x.launcher.cancel(); expect(x.listeners.size).toBe(0);
+});
+afterEach(() => { cleanupLaunchers.splice(0).forEach(cancel => cancel()); vi.useRealTimers(); });
 describe('hardened EMS PMS launcher', () => {
   it('opens synchronously, validates source/origin and sends one bounded identity', async () => {
     const x = fixture(); x.launcher.launch('http://localhost:3000/');
@@ -23,6 +37,22 @@ describe('hardened EMS PMS launcher', () => {
     x.dispatch(ready); x.dispatch(ready); await vi.waitFor(() => expect(x.child.postMessage).toHaveBeenCalledTimes(1));
     expect(x.getToken).toHaveBeenCalledTimes(1);
     expect(x.child.postMessage).toHaveBeenCalledWith({ ...ready, type: 'pms:identity', token: 'fictional-signed-token' }, 'http://localhost:3000');
+    expect(x.listeners.size).toBe(1);
+    x.launcher.cancel(); expect(x.listeners.size).toBe(0);
+  });
+  it('releases the listener when the authenticated child closes', async () => {
+    vi.useFakeTimers(); const x = fixture(); x.launcher.launch('http://localhost:3000/');
+    x.dispatch(ready); await Promise.resolve(); expect(x.listeners.size).toBe(1);
+    x.child.closed = true; await vi.advanceTimersByTimeAsync(1000);
+    expect(x.listeners.size).toBe(0); expect(x.onSettled).toHaveBeenCalledTimes(1);
+  });
+  it('fresh revalidation fails closed if EMS revokes access', async () => {
+    const x = fixture(); x.launcher.launch('http://localhost:3000/'); x.dispatch(ready);
+    await vi.waitFor(() => expect(x.child.postMessage).toHaveBeenCalledTimes(1));
+    x.getToken.mockRejectedValue(new Error('Access revoked'));
+    x.dispatch({ ...ready, challenge: 'b'.repeat(64) });
+    await vi.waitFor(() => expect(x.onError).toHaveBeenCalled());
+    expect(x.child.postMessage).toHaveBeenLastCalledWith({ ...ready, challenge: 'b'.repeat(64), type: 'pms:error', code: 'LAUNCH_FAILED' }, 'http://localhost:3000');
     expect(x.listeners.size).toBe(0);
   });
   it('blocks invalid destinations and popup failures before requesting credentials', () => {
