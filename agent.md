@@ -88,3 +88,9 @@ Already implemented. Keep improving validation, preview editing, and post-import
 - Calendar Events now support from/to date ranges in backend, frontend forms, and calendar rendering.
 - Announcement and Calendar Event popup modals were widened and reorganized for easier HR editing.
 - Add Employee address fields now use Pakistan-only searchable location dropdowns with live add for province, district, city, and town/area.
+
+## 2026-10-12 - PMS child continuity across EMS routes
+
+PmsLaunchProvider inside AuthProvider owns the existing strict child-bound launcher above routes. Launchpad consumes launch/cancel/status; SPA HR navigation no longer removes the recovery listener. Authentication identity, employee, role, password state, loading or access changes cancel it; stable-identity heartbeat object updates do not. No token or child-binding persistence. Full document reload requires fresh launch.
+
+Verified: 28 focused tests (also independently reviewed/run), full frontend suite 146 tests/39 files, Vite build and targeted ESLint. Existing TypeScript baseline remains 46 diagnostics; ImportMeta.env diagnostic moved with launcher configuration from Launchpad into provider. Real local EMS/PMS/gRPC browser QA passed HR navigation, child reload, explicit same-employee recovery and unsaved form retention, with manual directory pagination afterward. PMS Docs/PROJECT-HISTORY.md records dated evidence and remaining gates; physical-device/long-idle proof remains open.

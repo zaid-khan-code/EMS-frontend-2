@@ -1,3 +1,4 @@
+import { PmsLaunchProvider } from './context/PmsLaunchContext';
 import React, { Suspense, lazy } from "react";
 import {
   BrowserRouter,
@@ -162,8 +163,11 @@ function RootRedirect() {
   return <Navigate to="/launchpad" />;
 }
 
+
+
 const App = () => (
   <AuthProvider>
+    <PmsLaunchProvider>
     <DataProvider>
       <ToastProvider>
         <BrowserRouter
@@ -414,6 +418,7 @@ const App = () => (
         </BrowserRouter>
       </ToastProvider>
     </DataProvider>
+    </PmsLaunchProvider>
   </AuthProvider>
 );
 

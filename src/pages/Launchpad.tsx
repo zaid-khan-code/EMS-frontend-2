@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React from "react";
 import { useNavigate, Navigate } from "react-router-dom";
 import {
   Users,
@@ -10,8 +10,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { useAuthStore } from "../store/useAuthStore";
 import logo from "../images/logo.png";
-import { createPmsLauncher } from '../services/pmsHandoff';
-import { apiClient } from '../services/apiClient';
+import { usePmsLaunch } from '../context/PmsLaunchContext';
 
 type ERPModule = {
   id: string;
@@ -85,21 +84,8 @@ export default function Launchpad() {
   const navigate = useNavigate();
   const { user, activeRole, logout } = useAuth();
   const hasPermission = useAuthStore((state) => state.hasPermission);
-  const projectManagementUrl =
-    import.meta.env.VITE_PROJECT_MANAGEMENT_URL?.trim() || "/project-management";
-  const [launchError, setLaunchError] = useState('');
-  const [launching, setLaunching] = useState(false);
-  const pmsLauncher = useMemo(() => createPmsLauncher({
-    getToken: async signal => {
-      const response = await apiClient.post('/auth/project-management/token', {}, { signal });
-      if (response.data?.success !== true || typeof response.data?.data?.token !== 'string') throw new Error('Invalid identity response');
-      return response.data.data.token;
-    },
-    onError: setLaunchError,
-    onSettled: () => setLaunching(false)
-  }), []);
+  const { launch, cancel, launchError, launching } = usePmsLaunch();
   const canLaunchPms = hasPermission('project_management.access');
-  useEffect(() => () => pmsLauncher.cancel(), [pmsLauncher, user?.username, user?.employeeId, activeRole, canLaunchPms]);
 
   if (!user) return <Navigate to="/login" replace />;
 
@@ -122,7 +108,7 @@ export default function Launchpad() {
 
     if (mod.id === 'pms') {
       if (!canLaunchPms || launching) return;
-      setLaunchError(''); setLaunching(true); pmsLauncher.launch(projectManagementUrl); return;
+      launch(); return;
     }
 
     if (mod.id === "ems") {
@@ -131,7 +117,7 @@ export default function Launchpad() {
     }
 
     if (mod.external) {
-      const url = mod.id === "pms" ? projectManagementUrl : mod.to;
+      const url = mod.to;
       if (url.startsWith("http")) {
         window.location.href = url;
       } else {
@@ -145,7 +131,7 @@ export default function Launchpad() {
 
   const handleLogout = () => {
     if (window.confirm("Are you sure you want to logout?")) {
-      pmsLauncher.cancel();
+      cancel();
       logout();
       navigate("/login");
     }

@@ -4,17 +4,17 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Launchpad from "./Launchpad";
 
-const authMock = vi.hoisted(() => ({ user: { username: "admin" }, activeRole: "hr_manager" }));
+const authMock = vi.hoisted(() => ({ user: { username: "admin" }, activeRole: "hr_manager", logout: vi.fn() }));
 const permissionMock = vi.hoisted(() => ({ permissions: new Set<string>() }));
-const launcherMock = vi.hoisted(() => ({ launch: vi.fn(), cancel: vi.fn() }));
-vi.mock('../services/pmsHandoff', () => ({ createPmsLauncher: () => launcherMock }));
+const launcherMock = vi.hoisted(() => ({ launch: vi.fn(), cancel: vi.fn(), launching: false, launchError: '' }));
+vi.mock('../context/PmsLaunchContext', () => ({ usePmsLaunch: () => launcherMock }));
 vi.mock('../services/apiClient', () => ({ apiClient: { post: vi.fn() } }));
 
 vi.mock("../context/AuthContext", () => ({
   useAuth: () => ({
     user: authMock.user,
     activeRole: authMock.activeRole,
-    logout: vi.fn(),
+    logout: authMock.logout,
   }),
 }));
 
@@ -46,7 +46,9 @@ describe("Launchpad", () => {
     cleanup();
     permissionMock.permissions.clear();
     vi.unstubAllEnvs();
-    launcherMock.launch.mockClear(); launcherMock.cancel.mockClear();
+    launcherMock.launch.mockClear();
+    launcherMock.cancel.mockClear();
+    authMock.logout.mockClear();
   });
 
   it("shows ERP module selector with HR module for all roles", () => {
@@ -81,11 +83,16 @@ describe("Launchpad", () => {
     expect(screen.getByText("HR & Employee Management")).toBeTruthy();
     expect(screen.getByText("Select a Module")).toBeTruthy();
   });
-  it('uses the configured bounded PMS launcher instead of URL navigation', () => {
-    vi.stubEnv('VITE_PROJECT_MANAGEMENT_URL', 'http://localhost:3000/');
+  it('delegates PMS launch to the persistent integration provider', () => {
     permissionMock.permissions.add('project_management.access'); renderLaunchpad();
     fireEvent.click(screen.getByText('Project Management'));
-    expect(launcherMock.launch).toHaveBeenCalledWith('http://localhost:3000/');
-    cleanup(); expect(launcherMock.cancel).toHaveBeenCalled();
+    expect(launcherMock.launch).toHaveBeenCalledOnce();
+  });
+  it('keeps confirmed logout functional after moving launcher ownership', () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    renderLaunchpad(); fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(authMock.logout).toHaveBeenCalledOnce();
+    expect(launcherMock.cancel).toHaveBeenCalledOnce();
+    vi.restoreAllMocks();
   });
 });
